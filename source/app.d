@@ -45,7 +45,7 @@ void main(string[] args)
 	glfwSetFramebufferSizeCallback(window, &windowResizeCallback);
 	glfwSetScrollCallback(window, &scrollCallback);
 	loadOpenGL();
-	
+
 	// Initialize Inochi2D
 	inInit(cast(double function())glfwGetTime);
 
@@ -57,6 +57,12 @@ void main(string[] args)
 	inGetCamera().scale = vec2(1);
 
 	Puppet puppet = inLoadPuppet(args[1]);
+	
+	if (environment.get("DEBUG") == "1") {
+		inDbgDrawMeshOutlines = true;
+		inDbgDrawMeshVertexPoints = true;
+		inDbgDrawMeshOrientation = true;
+	}
 
 	while(!glfwWindowShouldClose(window)) {
 		glClear(GL_COLOR_BUFFER_BIT);
@@ -70,6 +76,7 @@ void main(string[] args)
 
 			puppet.update();
 			puppet.draw();
+			puppet.drawOutlines();
 
 		inEndScene();
 
