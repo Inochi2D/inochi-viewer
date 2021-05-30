@@ -65,8 +65,16 @@ void main(string[] args)
 	} else {
 		foreach(i; 1..args.length) {
 			puppets ~= inLoadPuppet(args[i]);
-
 			puppets[i-1].root.localTransform.translation.x = (((i)*2048)-halfway)-1024;
+
+			import std.array : join;
+
+			auto meta = puppets[i-1].meta;
+			writefln("---Model Info---\n%s by %s\n%s\n", 
+				meta.name, 
+				meta.authors.join(", "),
+				meta.copyright
+			);
 		}
 	}
 	
