@@ -56,7 +56,19 @@ void main(string[] args)
 
 	inGetCamera().scale = vec2(1);
 
-	Puppet puppet = inLoadPuppet(args[1]);
+	Puppet[] puppets;
+
+	float size = (args.length-1)*2048;
+	float halfway = size/2;
+	if (args.length == 1) {
+		puppets ~= inLoadPuppet(args[1]);
+	} else {
+		foreach(i; 1..args.length) {
+			puppets ~= inLoadPuppet(args[i]);
+
+			puppets[i-1].root.localTransform.translation.x = (((i)*2048)-halfway)-1024;
+		}
+	}
 	
 	if (environment.get("DEBUG") == "1") {
 		inDbgDrawMeshOutlines = true;
@@ -74,9 +86,11 @@ void main(string[] args)
 
 			updateCamera();
 
-			puppet.update();
-			puppet.draw();
-			puppet.drawOutlines();
+			foreach(puppet; puppets) {
+				puppet.update();
+				puppet.draw();
+				puppet.drawOutlines();
+			}
 
 		inEndScene();
 
