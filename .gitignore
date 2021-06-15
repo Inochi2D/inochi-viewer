@@ -16,3 +16,7 @@ inochi-viewer-test-*
 mdl/
 out/
 dub.selections.json
+.DS_Store
+*.dylib
+*.a
+*.inp

@@ -6,7 +6,7 @@ import std.string;
 import inochi2d.core.dbg;
 import std.process;
 
-extern(C) void windowResizeCallback(GLFWwindow* window, int width, int height) nothrow {
+extern(C) void fbResizeCallback(GLFWwindow* window, int width, int height) nothrow {
 	inSetViewport(width, height);
 }
 
@@ -19,7 +19,6 @@ extern(C) void scrollCallback(GLFWwindow* window, double xoffset, double yoffset
 	camera.scale = vec2(clamp(camera.scale.x, 0.01, 1));
 }
 
-
 GLFWwindow* window;
 void main(string[] args)
 {
@@ -31,18 +30,29 @@ void main(string[] args)
 	// Loads GLFW
 	loadGLFW();
 	glfwInit();
+	version(OSX) {
+		pragma(msg, "Building in macOS support mode...");
 
-	// Create Window and initialize OpenGL 4.2 with compat profile
-	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+		// macOS only supports up to GL 4.1 with some extra stuff
+		glfwWindowHint (GLFW_CONTEXT_VERSION_MAJOR, 4);
+		glfwWindowHint (GLFW_CONTEXT_VERSION_MINOR, 1);
+		glfwWindowHint (GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+		glfwWindowHint (GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+	} else {
+
+		// Create Window and initialize OpenGL 4.2 with compat profile
+		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+		glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+		glfwWindowHint (GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+		glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
+	}
 
 	glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, environment.get("TRANSPARENT") == "1" ? GLFW_TRUE : GLFW_FALSE);
 
 	glfwWindowHint(GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE, 8);
 	window = glfwCreateWindow(1024, 1024, "Inochi2D Viewer".toStringz, null, null);
 	glfwMakeContextCurrent(window);
-	glfwSetFramebufferSizeCallback(window, &windowResizeCallback);
+	glfwSetFramebufferSizeCallback(window, &fbResizeCallback);
 	glfwSetScrollCallback(window, &scrollCallback);
 	loadOpenGL();
 
@@ -51,8 +61,8 @@ void main(string[] args)
 
 	// Prepare viewport
 	int sceneWidth, sceneHeight;
-	inSetViewport(1024, 1024);
-	inGetViewport(sceneWidth, sceneHeight);
+	glfwGetFramebufferSize(window, &sceneWidth, &sceneHeight);
+	inSetViewport(sceneWidth, sceneHeight);
 
 	inGetCamera().scale = vec2(1);
 
@@ -82,7 +92,7 @@ void main(string[] args)
 	}
 
 	while(!glfwWindowShouldClose(window)) {
-		glClear(GL_COLOR_BUFFER_BIT);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 		// Update Inochi2D
 		inUpdate();
