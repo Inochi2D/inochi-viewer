@@ -78,9 +78,10 @@ void main(string[] args)
 		import std.array : join;
 
 		auto meta = puppets[i-1].meta;
-		writefln("---Model Info---\n%s by %s\n%s\n", 
+		writefln("---Model Info---\n%s by %s & %s\n%s\n", 
 			meta.name, 
-			meta.authors.join(", "),
+			meta.artist,
+			meta.rigger,
 			meta.copyright
 		);
 	}
@@ -104,13 +105,15 @@ void main(string[] args)
 			foreach(puppet; puppets) {
 				puppet.update();
 				puppet.draw();
-				puppet.drawOutlines();
+				//puppet.drawOutlines();
 			}
 
 		inEndScene();
 
 		// Draws the scene to the screen
-		inDrawScene(vec4(0, 0, 2048, 2048));
+		int w, h;
+		inGetViewport(w, h);
+		inDrawScene(vec4(0, 0, w, h));
 
 		// End of loop stuff
 		glfwSwapBuffers(window);
