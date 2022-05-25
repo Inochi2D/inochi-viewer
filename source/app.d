@@ -1,3 +1,9 @@
+/*
+    Copyright © 2020, Inochi2D Project
+    Distributed under the 2-Clause BSD License, see LICENSE file.
+    
+    Authors: Luna Nielsen
+*/
 import std.stdio;
 import bindbc.glfw;
 import bindbc.opengl;
@@ -65,6 +71,8 @@ void main(string[] args)
 	inSetViewport(sceneWidth, sceneHeight);
 
 	inGetCamera().scale = vec2(1);
+
+	//inSetUpdateBounds(true);
 
 	Puppet[] puppets;
 
