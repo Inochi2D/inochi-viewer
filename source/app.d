@@ -281,6 +281,7 @@ void main(string[] args)
 						maskFB.textures[0].bind(0);
 						compFBs[compositeDepth].bindAsTarget(1);
 
+						activeFB.use();
 						mainShader.use();
 						mainShader.setUniform(mainModelViewMatrix, mat4.identity);
 						mainShader.setUniform(mainOpacity, cmd.opacity);
