@@ -3,9 +3,17 @@ description "Basic Inochi2D Puppet viewer"
 authors "Luna"
 copyright "Copyright © 2021, Luna"
 license "BSD 2-clause"
-dependency "bindbc-glfw" version="~>0.13.0"
-dependency "bindbc-opengl" version="~>0.17.1"
-dependency "inochi2d" version="~>1.0.0"
+
+dependency "bindbc-glfw" version=">=0.13.0"
+dependency "bindbc-opengl" version="*"
+dependency "inochi2d" path="D:/Work/Inochi2D/inochi2d"
+
 targetPath "out/"
 copyFiles "libs/*" platform="windows"
-versions "GL_32" "GL_AllowDeprecated" "GL_ARB_framebuffer_sRGB"
+versions "GL_45" "GL_ARB_framebuffer_sRGB"
+
+dflags "-mcpu=native"
+
+stringImportPaths "res/"
+
+workingDirectory "out/"

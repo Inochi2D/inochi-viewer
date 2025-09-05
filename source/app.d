@@ -9,21 +9,10 @@ import bindbc.glfw;
 import bindbc.opengl;
 import inochi2d;
 import std.string;
-import inochi2d.core.dbg;
 import std.process;
-
-extern(C) void fbResizeCallback(GLFWwindow* window, int width, int height) nothrow {
-	inSetViewport(width, height);
-}
-
-float scalev = 1;
-extern(C) void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) nothrow{
-	auto camera = (cast(Camera function() nothrow)&inGetCamera)();
-
-	scalev = camera.scale.x;
-	camera.scale += vec2((yoffset*(0.05*scalev)));
-	camera.scale = vec2(clamp(camera.scale.x, 0.01, 1));
-}
+import nulib.math : clamp;
+import inochi2d.core.math;
+import gl;
 
 GLFWwindow* window;
 void main(string[] args)
@@ -36,46 +25,23 @@ void main(string[] args)
 	// Loads GLFW
 	loadGLFW();
 	glfwInit();
-	version(OSX) {
-		pragma(msg, "Building in macOS support mode...");
 
-		// macOS only supports up to GL 4.1 with some extra stuff
-		glfwWindowHint (GLFW_CONTEXT_VERSION_MAJOR, 4);
-		glfwWindowHint (GLFW_CONTEXT_VERSION_MINOR, 1);
-		glfwWindowHint (GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-		glfwWindowHint (GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-	} else {
+	glfwWindowHint (GLFW_CONTEXT_VERSION_MAJOR, 4);
+	glfwWindowHint (GLFW_CONTEXT_VERSION_MINOR, 5);
+	glfwWindowHint (GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+	glfwWindowHint (GLFW_TRANSPARENT_FRAMEBUFFER, environment.get("TRANSPARENT") == "1" ? GLFW_TRUE : GLFW_FALSE);
+	glfwWindowHint (GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE, 8);
 
-		// Create Window and initialize OpenGL 4.2 with compat profile
-		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-		glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
-		glfwWindowHint (GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-		glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
-	}
-
-	glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, environment.get("TRANSPARENT") == "1" ? GLFW_TRUE : GLFW_FALSE);
-
-	glfwWindowHint(GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE, 8);
 	window = glfwCreateWindow(1024, 1024, "Inochi2D Viewer".toStringz, null, null);
 	glfwMakeContextCurrent(window);
-	glfwSetFramebufferSizeCallback(window, &fbResizeCallback);
-	glfwSetScrollCallback(window, &scrollCallback);
 	loadOpenGL();
 
-	// Initialize Inochi2D
-	inInit(cast(double function())glfwGetTime);
 
 	// Prepare viewport
 	int sceneWidth, sceneHeight;
 	glfwGetFramebufferSize(window, &sceneWidth, &sceneHeight);
-	inSetViewport(sceneWidth, sceneHeight);
-
-	inGetCamera().scale = vec2(1);
-
-	//inSetUpdateBounds(true);
 
 	Puppet[] puppets;
-
 	float size = (args.length-1)*2048;
 	float halfway = size/2;
 
@@ -84,7 +50,6 @@ void main(string[] args)
 		puppets[i-1].root.localTransform.translation.x = (((i)*2048)-halfway)-1024;
 
 		import std.array : join;
-
 		auto meta = puppets[i-1].meta;
 		writefln("---Model Info---\n%s by %s & %s\n%s\n", 
 			meta.name, 
@@ -92,69 +57,254 @@ void main(string[] args)
 			meta.rigger,
 			meta.copyright
 		);
+
+		foreach(ref Texture tex; puppets[i-1].textureCache.cache) {
+			tex.id = cast(void*)nogc_new!GLTexture(GL_RGBA, tex.width, tex.height, tex.pixels.ptr);
+		}
 	}
-	
-	if (environment.get("DEBUG") == "1") {
-		inDbgDrawMeshOutlines = true;
-		inDbgDrawMeshVertexPoints = true;
-		inDbgDrawMeshOrientation = true;
-	}
+
+	//
+	//			MASK BUFFER
+	//
+	GLFramebuffer maskFB = nogc_new!GLFramebuffer(sceneWidth, sceneHeight, "Mask FB");
+	maskFB.attach(nogc_new!GLTexture(GL_RED, sceneWidth, sceneHeight));
+
+	GLShader maskShader  = nogc_new!GLShader(import("mask.vert"), import("mask.frag"), "mask program");
+	GLint maskModelViewMatrix = maskShader.getUniformLocation("modelViewMatrix");
+	GLint maskMode = maskShader.getUniformLocation("maskMode");
+							
+	//
+	//			MAIN BUFFER
+	//
+	GLFramebuffer mainFB = nogc_new!GLFramebuffer(sceneWidth, sceneHeight, "Main FB");
+	foreach(i; 0..4)
+		mainFB.attach(nogc_new!GLTexture(GL_RGBA, sceneWidth, sceneHeight));
+
+	GLShader mainShader = nogc_new!GLShader(import("basic.vert"), import("basic.frag"), "main program");
+	GLint mainModelViewMatrix = mainShader.getUniformLocation("modelViewMatrix");
+	GLint mainOpacity = mainShader.getUniformLocation("opacity");
+
+	//
+	//			COMPOSITE BUFFERS
+	//
+	GLFramebuffer[] compFBs;
+	GLFramebuffer activeFB;
+
+	//
+	//			BUFFER STATE
+	//
+	GLuint vao;
+	GLuint[2] buffers;
+
+	glGenVertexArrays(1, &vao);
+	glBindVertexArray(vao);
+
+	glGenBuffers(2, buffers.ptr);
+	glBindBuffer(GL_ARRAY_BUFFER, buffers[0]);
+
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 2, GL_FLOAT, false, VtxData.sizeof, null);
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 2, GL_FLOAT, false, VtxData.sizeof, cast(void*)8);
+
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffers[1]);
+
+
+	Camera2D cam = new Camera2D();
+	cam.scale = 0.25;
+
+	double lastTime = 0;
+	size_t dIdx = 0;
+	float x = 0;
+
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_STENCIL_TEST);
+	glEnable(GL_BLEND);
 
 	while(!glfwWindowShouldClose(window)) {
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		double currTime = glfwGetTime();
+		double deltaTime = currTime-lastTime;
 
-		// Update Inochi2D
-		inUpdate();
+		// Setup GL frame state.
+		glClear(GL_COLOR_BUFFER_BIT);
+		glfwGetFramebufferSize(window, &sceneWidth, &sceneHeight);
+		glViewport(0, 0, sceneWidth, sceneHeight);
 
-		inBeginScene();
+		// Update Camera
+		cam.size = vec2(sceneWidth, sceneHeight);
+		cam.update();
 
-			updateCamera();
+		x = sin(currTime*2) * 512;
 
-			foreach(puppet; puppets) {
-				puppet.update();
-				puppet.draw();
-				//puppet.drawOutlines();
+		mainFB.resize(sceneWidth, sceneHeight);
+		maskFB.resize(sceneWidth, sceneHeight);
+		foreach(comp; compFBs)
+			comp.resize(sceneWidth, sceneHeight);
+		
+		activeFB = mainFB;
+		foreach(puppet; puppets) {
+			// foreach(param; puppet.parameters)
+			// 	param.normalizedValue = vec2((sin(currTime)+1.0)/2.0, (cos(currTime)+1.0)/2.0);
+
+			puppet.update(cast(float)deltaTime);
+			puppet.draw(cast(float)deltaTime);
+		
+			glBufferData(GL_ARRAY_BUFFER, puppet.drawList.vertices.length*VtxData.sizeof, puppet.drawList.vertices.ptr, GL_DYNAMIC_DRAW);
+			glBufferData(GL_ELEMENT_ARRAY_BUFFER, puppet.drawList.indices.length*uint.sizeof, puppet.drawList.indices.ptr, GL_DYNAMIC_DRAW);
+
+			// Clear Mask
+			maskFB.use();
+			maskShader.use();
+			glClearColor(1, 1, 1, 1);
+			glClear(GL_COLOR_BUFFER_BIT);
+
+			activeFB.use();
+			mainShader.use();
+			glClearColor(0, 0, 0, 0);
+			glClear(GL_COLOR_BUFFER_BIT);
+
+			uint maskStep = 0;
+			uint compositeDepth = 0;
+			cmds: foreach(DrawCmd cmd; puppet.drawList.commands) {
+				final switch(cmd.state) {
+					case DrawState.normal:
+						if (maskStep > 0) {
+							maskStep = 0;
+
+							// Disable masking.
+							maskFB.use();
+							glClearColor(1, 1, 1, 1);
+							glClear(GL_COLOR_BUFFER_BIT);
+							glClearColor(0, 0, 0, 0);
+
+							// Re-enable main FB.
+							activeFB.use();
+							mainShader.use();
+						}
+
+						mainShader.setUniform(mainModelViewMatrix, cam.matrix);
+						mainShader.setUniform(mainOpacity, cmd.opacity);
+						maskFB.textures[0].bind(0);
+						foreach(i, src; cmd.sources) {
+							if (src !is null)
+								(cast(GLTexture)src.id).bind(cast(uint)i+1);
+						}
+
+						inSetBlendModeLegacy(cmd.blendMode);
+						glDrawElementsBaseVertex(
+							GL_TRIANGLES, 
+							cmd.elemCount, 
+							GL_UNSIGNED_INT, 
+							cast(void*)(cmd.idxOffset*4), 
+							cmd.vtxOffset
+						);
+						break;
+					
+					case DrawState.defineMask:
+						if (maskStep != 1) {
+							maskStep = 1;
+							
+							// Start mask FB
+							maskFB.use();
+							maskShader.use();
+
+							// Clear mask buffer and set blend mode.
+							glClearColor(0, 0, 0, 0);
+							glClear(GL_COLOR_BUFFER_BIT);
+							glBlendFunc(GL_ONE, GL_ONE);
+						}
+
+						maskShader.setUniform(maskModelViewMatrix, cam.matrix);
+						maskShader.setUniform(maskMode, cmd.maskMode == MaskingMode.mask);
+						(cast(GLTexture)cmd.sources[0].id).bind(0);
+
+						glDrawElementsBaseVertex(
+							GL_TRIANGLES, 
+							cmd.elemCount, 
+							GL_UNSIGNED_INT, 
+							cast(void*)(cmd.idxOffset*4), 
+							cmd.vtxOffset
+						);
+						break;
+					
+					case DrawState.maskedDraw:
+						if (maskStep == 0)
+							continue cmds;
+
+						// Start main FB
+						if (maskStep == 1) {
+							maskStep = 2;
+							activeFB.use();
+							mainShader.use();
+						}
+
+						mainShader.setUniform(mainModelViewMatrix, cam.matrix);
+						mainShader.setUniform(mainOpacity, cmd.opacity);
+						maskFB.textures[0].bind(0);
+						foreach(i, src; cmd.sources) {
+							if (src !is null)
+								(cast(GLTexture)src.id).bind(cast(uint)i+1);
+						}
+
+						inSetBlendModeLegacy(cmd.blendMode);
+						glDrawElementsBaseVertex(
+							GL_TRIANGLES, 
+							cmd.elemCount, 
+							GL_UNSIGNED_INT, 
+							cast(void*)(cmd.idxOffset*4), 
+							cmd.vtxOffset
+						);
+						break;
+					
+					case DrawState.compositeBegin:
+						compositeDepth++;
+						if (compositeDepth >= compFBs.length) {
+							import std.conv : text;
+							compFBs ~= nogc_new!GLFramebuffer(sceneWidth, sceneHeight, "Composite "~compositeDepth.text);
+							foreach(i; 0..4)
+								compFBs[$-1].attach(nogc_new!GLTexture(GL_RGBA, sceneWidth, sceneHeight));
+						}
+
+						activeFB = compFBs[compositeDepth-1];
+						activeFB.use();
+						glClear(GL_COLOR_BUFFER_BIT);
+						break;
+
+					case DrawState.compositeEnd:
+						compositeDepth--;
+						activeFB = compositeDepth > 0 ? compFBs[compositeDepth-1] : mainFB;
+						activeFB.use();
+						break;
+
+					case DrawState.compositeBlit:
+						maskFB.textures[0].bind(0);
+						compFBs[compositeDepth].bindAsTarget(1);
+
+						mainShader.use();
+						mainShader.setUniform(mainModelViewMatrix, mat4.identity);
+						mainShader.setUniform(mainOpacity, cmd.opacity);
+						inSetBlendModeLegacy(cmd.blendMode);
+						glDrawElementsBaseVertex(
+							GL_TRIANGLES, 
+							cmd.elemCount, 
+							GL_UNSIGNED_INT, 
+							cast(void*)(cmd.idxOffset*4), 
+							cmd.vtxOffset
+						);
+						break;
+				}
 			}
+		}
 
-		inEndScene();
-
-		// Draws the scene to the screen
-		int w, h;
-		inGetViewport(w, h);
-		inDrawScene(vec4(0, 0, w, h));
-
+		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+		mainFB.blitTo(null);
+		
 		// End of loop stuff
 		glfwSwapBuffers(window);
 		glfwPollEvents();
-	}
-}
 
-bool moving;
-double sx = 0, sy = 0;
-double csx = 0, csy = 0;
-void updateCamera() {
-	double x = 0, y = 0;
-	int w, h;
-	glfwGetCursorPos(window, &x, &y);
-	glfwGetWindowSize(window, &w, &h);
-
-	auto camera = inGetCamera();
-	
-	if (moving && !glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT)) moving = false;
-	if (!moving && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT)) {
-		moving = true;
-		sx = x;
-		sy = y;
-		csx = camera.position.x;
-		csy = camera.position.y;
-	}
-
-	if (moving) {
-		float ascalev = 0.5+clamp(1-scalev, 0.1, 1);
-
-		camera.position = vec2(
-			csx - (sx-x)*ascalev,
-			csy - (sy-y)*ascalev
-		);
+		lastTime = currTime;
+		dIdx++;
 	}
 }

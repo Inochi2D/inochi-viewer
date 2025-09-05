@@ -20,3 +20,5 @@ dub.selections.json
 *.dylib
 *.a
 *.inp
+
+__dummy_docs/
