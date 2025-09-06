@@ -95,6 +95,7 @@ void main(string[] args)
 	//
 	GLuint vao;
 	GLuint[2] buffers;
+	GLuint ubo;
 
 	glGenVertexArrays(1, &vao);
 	glBindVertexArray(vao);
@@ -109,6 +110,9 @@ void main(string[] args)
 
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffers[1]);
 
+	glGenBuffers(1, &ubo);
+	glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+	glBufferData(GL_UNIFORM_BUFFER, 64, null, GL_DYNAMIC_DRAW);
 
 	Camera2D cam = new Camera2D();
 	cam.scale = 0.25;
@@ -144,8 +148,8 @@ void main(string[] args)
 		
 		activeFB = mainFB;
 		foreach(puppet; puppets) {
-			// foreach(param; puppet.parameters)
-			// 	param.normalizedValue = vec2((sin(currTime)+1.0)/2.0, (cos(currTime)+1.0)/2.0);
+			foreach(param; puppet.parameters)
+				param.normalizedValue = vec2((sin(currTime)+1.0)/2.0, (cos(currTime)+1.0)/2.0);
 
 			puppet.update(cast(float)deltaTime);
 			puppet.draw(cast(float)deltaTime);
@@ -167,6 +171,9 @@ void main(string[] args)
 			uint maskStep = 0;
 			uint compositeDepth = 0;
 			cmds: foreach(DrawCmd cmd; puppet.drawList.commands) {
+				glNamedBufferSubData(ubo, 0, 64, cmd.variables.ptr);
+				glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo);
+
 				final switch(cmd.state) {
 					case DrawState.normal:
 						if (maskStep > 0) {
@@ -184,7 +191,6 @@ void main(string[] args)
 						}
 
 						mainShader.setUniform(mainModelViewMatrix, cam.matrix);
-						mainShader.setUniform(mainOpacity, cmd.opacity);
 						maskFB.textures[0].bind(0);
 						foreach(i, src; cmd.sources) {
 							if (src !is null)
@@ -240,7 +246,6 @@ void main(string[] args)
 						}
 
 						mainShader.setUniform(mainModelViewMatrix, cam.matrix);
-						mainShader.setUniform(mainOpacity, cmd.opacity);
 						maskFB.textures[0].bind(0);
 						foreach(i, src; cmd.sources) {
 							if (src !is null)
@@ -284,7 +289,6 @@ void main(string[] args)
 						activeFB.use();
 						mainShader.use();
 						mainShader.setUniform(mainModelViewMatrix, mat4.identity);
-						mainShader.setUniform(mainOpacity, cmd.opacity);
 						inSetBlendModeLegacy(cmd.blendMode);
 						glDrawElementsBaseVertex(
 							GL_TRIANGLES, 
