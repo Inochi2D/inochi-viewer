@@ -308,11 +308,11 @@ void inSetBlendModeLegacy(BlendMode blendingMode) {
 			glBlendEquation(GL_FUNC_ADD);
 			glBlendFunc(GL_ZERO, GL_SRC_ALPHA); break;
 
-		case BlendMode.clipToLower:
+		case BlendMode.sourceIn:
 			glBlendEquation(GL_FUNC_ADD);
 			glBlendFunc(GL_DST_ALPHA, GL_ONE_MINUS_SRC_ALPHA); break;
 
-		case BlendMode.sliceFromLower:
+		case BlendMode.sourceOut:
 			glBlendEquation(GL_FUNC_ADD);
 			glBlendFunc(GL_ZERO, GL_ONE_MINUS_SRC_ALPHA); break;
 	}
