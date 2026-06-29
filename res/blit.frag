@@ -16,23 +16,12 @@ layout(binding = 1) uniform sampler2D albedo;
 layout(binding = 2) uniform sampler2D emission;
 layout(binding = 3) uniform sampler2D bumpmap;
 
-layout(std140, binding = 8)
-uniform _uniforms {
-    vec3 tint;
-    vec3 screenTint;
-    float opacity;
-};
-
-vec4 screen(vec4 inColor, vec3 screenColor) {
-    return vec4(vec3(1.0) - ((vec3(1.0)-inColor.rgb) * (vec3(1.0)-(screenColor*inColor.a))), inColor.a);
-}
-
 void main() {
-    vec4 inAlbedo = texture(albedo, texUVs) * opacity * texture(mask, ndcTexCoords).rrrr;
+    vec4 inAlbedo = texture(albedo, texUVs) * texture(mask, ndcTexCoords).rrrr;
     vec4 inEmission = texture(emission, texUVs);
     vec4 inBumpmap = texture(bumpmap, texUVs);
 
-    outAlbedo = screen(inAlbedo, screenTint) * vec4(tint, 1.0);
+    outAlbedo = inAlbedo;
     outEmission = inEmission * outAlbedo.aaaa;
     outBumpmap = inBumpmap * outAlbedo.aaaa;
 }

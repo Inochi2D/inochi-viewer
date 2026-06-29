@@ -61,6 +61,13 @@ void main(string[] args)
 	}
 
 	//
+	//			COMPOSITE BUFFERS
+	//
+	GLFramebuffer[] compFBs;
+	GLFramebuffer activeFB;
+	GLShader blitShader = nogc_new!GLShader(import("blit.vert"), import("blit.frag"), "blit program");
+
+	//
 	//			MASK BUFFER
 	//
 	GLFramebuffer maskFB = nogc_new!GLFramebuffer(sceneWidth, sceneHeight, "Mask FB");
@@ -69,7 +76,7 @@ void main(string[] args)
 	GLShader maskShader  = nogc_new!GLShader(import("mask.vert"), import("mask.frag"), "mask program");
 	GLint maskModelViewMatrix = maskShader.getUniformLocation("modelViewMatrix");
 	GLint maskMode = maskShader.getUniformLocation("maskMode");
-							
+
 	//
 	//			MAIN BUFFER
 	//
@@ -79,13 +86,6 @@ void main(string[] args)
 
 	GLShader mainShader = nogc_new!GLShader(import("basic.vert"), import("basic.frag"), "main program");
 	GLint mainModelViewMatrix = mainShader.getUniformLocation("modelViewMatrix");
-	GLint mainOpacity = mainShader.getUniformLocation("opacity");
-
-	//
-	//			COMPOSITE BUFFERS
-	//
-	GLFramebuffer[] compFBs;
-	GLFramebuffer activeFB;
 
 	//
 	//			BUFFER STATE
@@ -110,6 +110,7 @@ void main(string[] args)
 	glGenBuffers(1, &ubo);
 	glBindBuffer(GL_UNIFORM_BUFFER, ubo);
 	glBufferData(GL_UNIFORM_BUFFER, 64, null, GL_DYNAMIC_DRAW);
+	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
 	Camera2D cam = new Camera2D();
 	cam.scale = 0.25;
@@ -168,10 +169,15 @@ void main(string[] args)
 			uint maskStep = 0;
 			uint compositeDepth = 0;
 			cmds: foreach(DrawCmd cmd; puppet.drawList.commands) {
-				glNamedBufferSubData(ubo, 0, 64, cmd.variables.ptr);
-				glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo);
+				glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+				glBufferSubData(GL_UNIFORM_BUFFER, 0, 64, cmd.variables.ptr);
+				glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-				final switch(cmd.state) {
+				glBindBufferRange(GL_UNIFORM_BUFFER, 8, ubo, 0, 64);
+
+				switch(cmd.state) {
+					default: break;
+
 					case DrawState.normal:
 						if (maskStep > 0) {
 							maskStep = 0;
@@ -213,7 +219,10 @@ void main(string[] args)
 							maskShader.use();
 
 							// Clear mask buffer and set blend mode.
-							glClearColor(0, 0, 0, 0);
+							if (cmd.maskMode == MaskingMode.mask)
+								glClearColor(0, 0, 0, 0);
+							else
+								glClearColor(1, 1, 1, 1);
 							glClear(GL_COLOR_BUFFER_BIT);
 							glBlendFunc(GL_ONE, GL_ONE);
 						}
@@ -284,8 +293,7 @@ void main(string[] args)
 						compFBs[compositeDepth].bindAsTarget(1);
 
 						activeFB.use();
-						mainShader.use();
-						mainShader.setUniform(mainModelViewMatrix, mat4.identity);
+						blitShader.use();
 						inSetBlendModeLegacy(cmd.blendMode);
 						glDrawElementsBaseVertex(
 							GL_TRIANGLES, 
@@ -294,6 +302,7 @@ void main(string[] args)
 							cast(void*)(cmd.idxOffset*4), 
 							cmd.vtxOffset
 						);
+						mainShader.use();
 						break;
 				}
 			}
