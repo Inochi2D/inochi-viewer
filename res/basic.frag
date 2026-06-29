@@ -31,9 +31,10 @@ void main() {
     vec4 inAlbedo = texture(albedo, texUVs) * texture(mask, ndcTexCoords).rrrr;
     vec4 inEmission = texture(emission, texUVs);
     vec4 inBumpmap = texture(bumpmap, texUVs);
-    vec4 multColor = vec4(tint, 1.0);
+    //vec4 multColor = vec4(tint, 1.0);
 
-    outAlbedo = screen(inAlbedo, screenTint) * multColor;
+    //outAlbedo = screen(inAlbedo, screenTint) * multColor;
+    outAlbedo = inAlbedo;
     outEmission = inEmission * outAlbedo.aaaa;
     outBumpmap = inBumpmap * outAlbedo.aaaa;
 }

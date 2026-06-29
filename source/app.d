@@ -10,8 +10,8 @@ import bindbc.opengl;
 import inochi2d;
 import std.string;
 import std.process;
-import nulib.math : clamp;
 import inochi2d.core.math;
+import numath;
 import gl;
 
 GLFWwindow* window;
@@ -46,21 +46,18 @@ void main(string[] args)
 	float halfway = size/2;
 
 	foreach(i; 1..args.length) {
-		puppets ~= inLoadPuppet(args[i]);
-		puppets[i-1].root.localTransform.translation.x = (((i)*2048)-halfway)-1024;
-
-		import std.array : join;
-		auto meta = puppets[i-1].meta;
-		writefln("---Model Info---\n%s by %s & %s\n%s\n", 
-			meta.name, 
-			meta.artist,
-			meta.rigger,
-			meta.copyright
+		auto puppet = Puppet.fromFile(args[i]).getOr(null);
+		puppet.root.localTransform.translation.x = (((i)*2048)-halfway)-1024;
+		writefln("---Model Info---\n%s by %s\n", 
+			puppet.properties.name, 
+			puppet.properties.author
 		);
 
-		foreach(ref Texture tex; puppets[i-1].textureCache.cache) {
+		foreach(ref Texture tex; puppet.textureCache.cache) {
 			tex.id = cast(void*)nogc_new!GLTexture(GL_RGBA, tex.width, tex.height, tex.pixels.ptr);
 		}
+
+		puppets ~= puppet;
 	}
 
 	//
@@ -148,8 +145,8 @@ void main(string[] args)
 		
 		activeFB = mainFB;
 		foreach(puppet; puppets) {
-			foreach(param; puppet.parameters)
-				param.normalizedValue = vec2((sin(currTime)+1.0)/2.0, (cos(currTime)+1.0)/2.0);
+			//foreach(param; puppet.parameters)
+			//	param.normalizedValue = vec2((sin(currTime)+1.0)/2.0, (cos(currTime)+1.0)/2.0);
 
 			puppet.update(cast(float)deltaTime);
 			puppet.draw(cast(float)deltaTime);

@@ -3,7 +3,7 @@
 */
 module gl;
 import bindbc.opengl;
-import inmath.linalg;
+import numath;
 import inochi2d;
 
 public import nulib;
@@ -245,7 +245,7 @@ public:
         Sets the current active matrix.
     */
     void setUniform(uint location, mat4 value) {
-        glUniformMatrix4fv(location, 1, GL_TRUE, value.ptr);
+        glUniformMatrix4fv(location, 1, GL_TRUE, value.data.ptr);
     }
 
     /**

@@ -6,7 +6,7 @@ license "BSD 2-clause"
 
 dependency "bindbc-glfw" version=">=0.13.0"
 dependency "bindbc-opengl" version="*"
-dependency "inochi2d" path="D:/Work/Inochi2D/inochi2d"
+dependency "inochi2d" path="../inochi2d"
 
 targetPath "out/"
 copyFiles "libs/*" platform="windows"
