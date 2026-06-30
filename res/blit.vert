@@ -14,7 +14,6 @@ out vec2 ndcTexCoords;
 
 void main() {
     vec4 vertexCoords = vec4(verts.x, verts.y, 0, 1);
-
     texUVs = uvs;
 
     // Normalized device coordinates go from -1..+1,

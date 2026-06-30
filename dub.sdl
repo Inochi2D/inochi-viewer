@@ -16,4 +16,4 @@ dflags "-mcpu=native"
 
 stringImportPaths "res/"
 
-workingDirectory "out/"
+//workingDirectory "out/"

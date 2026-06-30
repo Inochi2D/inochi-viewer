@@ -2,12 +2,117 @@
     OpenGL Abstractions to make the code more readable.
 */
 module gl;
+import numem.core.traits;
 import bindbc.opengl;
 import numath;
 import inochi2d;
 
 public import nulib;
 public import numem;
+
+/**
+    A stack of GL Objects
+*/
+struct GLStack(T, alias ifunc) 
+if (is(typeof(ifunc) == T function(ptrdiff_t depth, U), U...)) {
+private:
+    T fallback;
+    T[] buffers;
+    ptrdiff_t depth_ = 0;
+
+public:
+
+    /**
+        Parameters
+    */
+    alias __param = Parameters!(typeof(ifunc))[1..$];
+
+    /**
+        Current depth of the stack.
+    */
+    @property ptrdiff_t depth() => depth_;
+
+    /**
+        Current element of the stack.
+    */
+    @property T current() => depth_ >= 1 ? buffers[depth_-1] : fallback;
+
+    /**
+        Last element of the stack.
+    */
+    @property T next() => depth_ < buffers.length ? buffers[depth_] : null;
+
+    /**
+        Last element of the stack.
+    */
+    @property T last() => depth_ >= 2 ? buffers[depth_-2] : fallback;
+
+    /**
+        Returns a slice of all the elements in the stack.
+    */
+    @property T[] all() => fallback~buffers;
+
+    /**
+        Constructs a new stack.
+    */
+    this(T fallback) {
+        this.fallback = fallback;
+    }
+
+    /**
+        Constructs a new stack.
+    */
+    this(__param cparam) {
+        this.fallback = ifunc(depth_, cparam);
+    }
+
+    /**
+        Pushes a object onto the stack.
+    */
+    T push(__param cparam) {
+        if (depth_ >= buffers.length) {
+            this.buffers ~= ifunc(depth_, cparam);
+        }
+        depth_++;
+        return this.current;
+    }
+
+    /**
+        Pops an object from the stack.
+    */
+    T pop() {
+        if (depth_ >= 1)
+            depth_--;
+        return this.current;
+    }
+
+    /**
+        Resets depth of stack.
+    */
+    void reset() {
+        depth_ = 0;
+    }
+}
+
+/**
+    A framebuffer stack
+*/
+alias GLFramebufferStack(string name, uint attachments, GLenum format = GL_RGBA) = GLStack!(GLFramebuffer, (ptrdiff_t depth, int width, int height) {
+    import std.conv : text;
+
+    auto fb = nogc_new!GLFramebuffer(width, height, name~" "~depth.text);
+    foreach(i; 0..attachments)
+        fb.attach(nogc_new!GLTexture(format, width, height));
+
+    return fb;
+});
+
+/**
+    A texture stack
+*/
+alias GLTextureStack = GLStack!(GLTexture, (ptrdiff_t depth, int width, int height) {
+    return nogc_new!GLTexture(GL_RGBA, width, height);
+});
 
 class GLTexture : NuObject {
 private:
@@ -140,6 +245,14 @@ public:
     */
     void attach(GLTexture texture) {
         textures ~= texture;
+    }
+
+    /**
+        Attaches a texture to the framebuffer.
+    */
+    void attach(GLTexture texture, uint at) {
+        textures[at] = texture;
+        glNamedFramebufferTexture(id, cast(GLenum)(GL_COLOR_ATTACHMENT0+at), texture.id, 0);
     }
 
     /**

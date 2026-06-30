@@ -14,6 +14,19 @@ import inochi2d.core.math;
 import numath;
 import gl;
 
+alias CompositeStack 	= GLFramebufferStack!("Composite", IN_MAX_ATTACHMENTS);
+alias MaskStack 		= GLFramebufferStack!("Mask", 1, GL_RED);
+
+void printNode(Node n, int depth = 0) {
+	foreach(i; 0..depth) {
+		write(i+1 == depth ? "- " : "  ");
+	}
+
+	writefln("%s %s %s %s", n.name, n.matrix.translation.data, n.matrix.scale.data, n.zSort);
+	foreach(c; n.children)
+		printNode(c, depth+1);
+}
+
 GLFWwindow* window;
 void main(string[] args)
 {
@@ -21,6 +34,17 @@ void main(string[] args)
 		writeln("No model specified!");
 		return;
 	}
+
+	IOSink sink;
+	sink.info = (const(char)* msg, const(char)* file, uint line) @nogc nothrow {
+		printf("%s(%d): %s\n", file, line, msg);
+	};
+	sink.warning = (const(char)* msg, const(char)* file, uint line) @nogc nothrow {
+		printf("warn %s(%d): %s\n", file, line, msg);
+	};
+	sink.error = (const(char)* msg, const(char)* file, uint line) @nogc nothrow {
+		printf("error %s(%d): %s\n", file, line, msg);
+	};
 
 	// Loads GLFW
 	loadGLFW();
@@ -46,7 +70,7 @@ void main(string[] args)
 	float halfway = size/2;
 
 	foreach(i; 1..args.length) {
-		auto puppet = Puppet.fromFile(args[i]).getOr(null);
+		auto puppet = Puppet.fromFile(args[i], sink).getOr(null);
 		puppet.root.localTransform.translation.x = (((i)*2048)-halfway)-1024;
 		writefln("---Model Info---\n%s by %s\n", 
 			puppet.properties.name, 
@@ -61,31 +85,25 @@ void main(string[] args)
 	}
 
 	//
+	//			MAIN BUFFER
+	//
+	GLShader mainShader = nogc_new!GLShader(import("basic.vert"), import("basic.frag"), "main program");
+	GLint mainModelViewMatrix = mainShader.getUniformLocation("modelViewMatrix");
+
+	//
 	//			COMPOSITE BUFFERS
 	//
-	GLFramebuffer[] compFBs;
-	GLFramebuffer activeFB;
+	CompositeStack cfbs = CompositeStack(sceneWidth, sceneHeight);
 	GLShader blitShader = nogc_new!GLShader(import("blit.vert"), import("blit.frag"), "blit program");
 
 	//
 	//			MASK BUFFER
 	//
-	GLFramebuffer maskFB = nogc_new!GLFramebuffer(sceneWidth, sceneHeight, "Mask FB");
-	maskFB.attach(nogc_new!GLTexture(GL_RED, sceneWidth, sceneHeight));
-
+	MaskStack cmasks = MaskStack(sceneWidth, sceneHeight);
 	GLShader maskShader  = nogc_new!GLShader(import("mask.vert"), import("mask.frag"), "mask program");
 	GLint maskModelViewMatrix = maskShader.getUniformLocation("modelViewMatrix");
 	GLint maskMode = maskShader.getUniformLocation("maskMode");
 
-	//
-	//			MAIN BUFFER
-	//
-	GLFramebuffer mainFB = nogc_new!GLFramebuffer(sceneWidth, sceneHeight, "Main FB");
-	foreach(i; 0..4)
-		mainFB.attach(nogc_new!GLTexture(GL_RGBA, sceneWidth, sceneHeight));
-
-	GLShader mainShader = nogc_new!GLShader(import("basic.vert"), import("basic.frag"), "main program");
-	GLint mainModelViewMatrix = mainShader.getUniformLocation("modelViewMatrix");
 
 	//
 	//			BUFFER STATE
@@ -99,13 +117,12 @@ void main(string[] args)
 
 	glGenBuffers(2, buffers.ptr);
 	glBindBuffer(GL_ARRAY_BUFFER, buffers[0]);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffers[1]);
 
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 2, GL_FLOAT, false, VtxData.sizeof, null);
 	glEnableVertexAttribArray(1);
 	glVertexAttribPointer(1, 2, GL_FLOAT, false, VtxData.sizeof, cast(void*)8);
-
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffers[1]);
 
 	glGenBuffers(1, &ubo);
 	glBindBuffer(GL_UNIFORM_BUFFER, ubo);
@@ -113,7 +130,7 @@ void main(string[] args)
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
 	Camera2D cam = new Camera2D();
-	cam.scale = 0.25;
+	cam.scale = 0.50;
 
 	double lastTime = 0;
 	size_t dIdx = 0;
@@ -123,6 +140,13 @@ void main(string[] args)
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_STENCIL_TEST);
 	glEnable(GL_BLEND);
+
+
+	foreach(puppet; puppets) {
+		puppet.update(0.016);
+		puppet.draw(0.016);
+		printNode(puppet.root);
+	}
 
 	while(!glfwWindowShouldClose(window)) {
 		double currTime = glfwGetTime();
@@ -139,13 +163,17 @@ void main(string[] args)
 
 		x = sin(currTime*2) * 512;
 
-		mainFB.resize(sceneWidth, sceneHeight);
-		maskFB.resize(sceneWidth, sceneHeight);
-		foreach(comp; compFBs)
+		// Resize textures.
+		foreach(comp; cfbs.all)
 			comp.resize(sceneWidth, sceneHeight);
+		foreach(mask; cmasks.all)
+			mask.resize(sceneWidth, sceneHeight);
 		
-		activeFB = mainFB;
 		foreach(puppet; puppets) {
+			cmasks.reset();
+			cfbs.reset();
+
+
 			//foreach(param; puppet.parameters)
 			//	param.normalizedValue = vec2((sin(currTime)+1.0)/2.0, (cos(currTime)+1.0)/2.0);
 
@@ -156,19 +184,17 @@ void main(string[] args)
 			glBufferData(GL_ELEMENT_ARRAY_BUFFER, puppet.drawList.indices.length*uint.sizeof, puppet.drawList.indices.ptr, GL_DYNAMIC_DRAW);
 
 			// Clear Mask
-			maskFB.use();
+			cmasks.current().use();
 			maskShader.use();
 			glClearColor(1, 1, 1, 1);
 			glClear(GL_COLOR_BUFFER_BIT);
 
-			activeFB.use();
+			cfbs.current.use();
 			mainShader.use();
 			glClearColor(0, 0, 0, 0);
 			glClear(GL_COLOR_BUFFER_BIT);
 
-			uint maskStep = 0;
-			uint compositeDepth = 0;
-			cmds: foreach(DrawCmd cmd; puppet.drawList.commands) {
+			foreach(DrawCmd cmd; puppet.drawList.commands) {
 				glBindBuffer(GL_UNIFORM_BUFFER, ubo);
 				glBufferSubData(GL_UNIFORM_BUFFER, 0, 64, cmd.variables.ptr);
 				glBindBuffer(GL_UNIFORM_BUFFER, 0);
@@ -179,28 +205,17 @@ void main(string[] args)
 					default: break;
 
 					case DrawState.normal:
-						if (maskStep > 0) {
-							maskStep = 0;
+						cfbs.current.use();
+						mainShader.use();
 
-							// Disable masking.
-							maskFB.use();
-							glClearColor(1, 1, 1, 1);
-							glClear(GL_COLOR_BUFFER_BIT);
-							glClearColor(0, 0, 0, 0);
-
-							// Re-enable main FB.
-							activeFB.use();
-							mainShader.use();
-						}
-
-						mainShader.setUniform(mainModelViewMatrix, cam.matrix);
-						maskFB.textures[0].bind(0);
+						cmasks.current.textures[0].bind(0);
 						foreach(i, src; cmd.sources) {
 							if (src !is null)
 								(cast(GLTexture)src.id).bind(cast(uint)i+1);
 						}
 
 						inSetBlendModeLegacy(cmd.blendMode);
+						mainShader.setUniform(mainModelViewMatrix, cam.matrix);
 						glDrawElementsBaseVertex(
 							GL_TRIANGLES, 
 							cmd.elemCount, 
@@ -211,24 +226,10 @@ void main(string[] args)
 						break;
 					
 					case DrawState.defineMask:
-						if (maskStep != 1) {
-							maskStep = 1;
-							
-							// Start mask FB
-							maskFB.use();
-							maskShader.use();
-
-							// Clear mask buffer and set blend mode.
-							if (cmd.maskMode == MaskingMode.mask)
-								glClearColor(0, 0, 0, 0);
-							else
-								glClearColor(1, 1, 1, 1);
-							glClear(GL_COLOR_BUFFER_BIT);
-							glBlendFunc(GL_ONE, GL_ONE);
-						}
-
+						cmasks.current.use();
+						maskShader.use();
 						maskShader.setUniform(maskModelViewMatrix, cam.matrix);
-						maskShader.setUniform(maskMode, cmd.maskMode == MaskingMode.mask);
+						maskShader.setUniform(maskMode, cast(int)cmd.maskMode);
 						(cast(GLTexture)cmd.sources[0].id).bind(0);
 
 						glDrawElementsBaseVertex(
@@ -240,76 +241,67 @@ void main(string[] args)
 						);
 						break;
 					
-					case DrawState.maskedDraw:
-						if (maskStep == 0)
-							continue cmds;
+					case DrawState.pushMask:
+						cmasks.push(sceneWidth, sceneHeight).use();
+						maskShader.use();
+						
+						if (cmasks.depth == 1) {
+							final switch(cmd.maskMode) {
+								case MaskingMode.mask:
+									glClearColor(0, 0, 0, 0);
+									glBlendFunc(GL_ONE, GL_ONE);
+									break;
+								case MaskingMode.dodge:
+									glClearColor(1, 1, 1, 1);
+									glBlendFunc(GL_ONE, GL_ZERO);
+									break;
+							}
 
-						// Start main FB
-						if (maskStep == 1) {
-							maskStep = 2;
-							activeFB.use();
-							mainShader.use();
+							glClear(GL_COLOR_BUFFER_BIT);
+						} else {
+
+							// Blit last mask to the current mask.
+							cmasks.last.blitTo(cmasks.current);
 						}
+						break;
 
-						mainShader.setUniform(mainModelViewMatrix, cam.matrix);
-						maskFB.textures[0].bind(0);
-						foreach(i, src; cmd.sources) {
-							if (src !is null)
-								(cast(GLTexture)src.id).bind(cast(uint)i+1);
-						}
-
-						inSetBlendModeLegacy(cmd.blendMode);
-						glDrawElementsBaseVertex(
-							GL_TRIANGLES, 
-							cmd.elemCount, 
-							GL_UNSIGNED_INT, 
-							cast(void*)(cmd.idxOffset*4), 
-							cmd.vtxOffset
-						);
+					case DrawState.popMask:
+						glClearColor(0, 0, 0, 0);
+						cmasks.pop();
 						break;
 					
 					case DrawState.compositeBegin:
-						compositeDepth++;
-						if (compositeDepth >= compFBs.length) {
-							import std.conv : text;
-							compFBs ~= nogc_new!GLFramebuffer(sceneWidth, sceneHeight, "Composite "~compositeDepth.text);
-							foreach(i; 0..4)
-								compFBs[$-1].attach(nogc_new!GLTexture(GL_RGBA, sceneWidth, sceneHeight));
-						}
-
-						activeFB = compFBs[compositeDepth-1];
-						activeFB.use();
+						cfbs.push(sceneWidth, sceneHeight).use();
 						glClear(GL_COLOR_BUFFER_BIT);
 						break;
 
 					case DrawState.compositeEnd:
-						compositeDepth--;
-						activeFB = compositeDepth > 0 ? compFBs[compositeDepth-1] : mainFB;
-						activeFB.use();
+						cfbs.pop().use();
 						break;
 
 					case DrawState.compositeBlit:
-						maskFB.textures[0].bind(0);
-						compFBs[compositeDepth].bindAsTarget(1);
+						if (auto blitSrc = cfbs.next) {
+							cmasks.current.textures[0].bind(0);
+							blitSrc.bindAsTarget(1);
 
-						activeFB.use();
-						blitShader.use();
-						inSetBlendModeLegacy(cmd.blendMode);
-						glDrawElementsBaseVertex(
-							GL_TRIANGLES, 
-							cmd.elemCount, 
-							GL_UNSIGNED_INT, 
-							cast(void*)(cmd.idxOffset*4), 
-							cmd.vtxOffset
-						);
-						mainShader.use();
+							cfbs.current.use();
+							blitShader.use();
+							inSetBlendModeLegacy(cmd.blendMode);
+							glDrawElementsBaseVertex(
+								GL_TRIANGLES, 
+								cmd.elemCount, 
+								GL_UNSIGNED_INT, 
+								cast(void*)(cmd.idxOffset*4), 
+								cmd.vtxOffset
+							);
+						}
 						break;
 				}
 			}
 		}
 
 		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-		mainFB.blitTo(null);
+		cfbs.all[0].blitTo(null);
 		
 		// End of loop stuff
 		glfwSwapBuffers(window);
