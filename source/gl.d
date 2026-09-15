@@ -114,7 +114,47 @@ alias GLTextureStack = GLStack!(GLTexture, (ptrdiff_t depth, int width, int heig
     return nogc_new!GLTexture(GL_RGBA, width, height);
 });
 
-class GLTexture : NuObject {
+class GLObject : NuObject {
+private:
+@nogc:
+    string name_ = "Object";
+    GLenum type_;
+    GLuint id_;
+
+public:
+
+    /**
+        The type of the object.
+    */
+    @property GLenum type() => type_;
+
+    /**
+        ID of the object.
+    */
+    @property GLuint id() => id_;
+
+    /**
+        The label of the object.
+    */
+    @property string label() => name_;
+    @property void label(string value) {
+        glObjectLabel(type_, id_, cast(GLsizei)value.length, value.ptr);
+    }
+
+    /**
+        Constructs an OpenGL Object.
+
+        Params:
+            type =  The type of the object
+            id =    The ID of the object.
+    */
+    this(GLenum type, GLuint id) {
+        this.type_ = type;
+        this.id_ = id;
+    }
+}
+
+class GLTexture : GLObject {
 private:
 @nogc:
     GLenum color;
@@ -123,13 +163,9 @@ private:
 
 public:
 
-    /**
-        OpenGL ID
-    */
-    GLuint id;
-
     // Destructor
     ~this() {
+        GLuint id = this.id;
         glDeleteTextures(1, &id);
     }
 
@@ -137,10 +173,12 @@ public:
         Creates a new texture.
     */
     this(GLenum color, uint width, uint height) {
+        uint id_; glGenTextures(1, &id_);
+        super(GL_TEXTURE, id_);
+
         this.color = color;
         this.width = width;
         this.height = height;
-        glGenTextures(1, &id);
         glBindTexture(GL_TEXTURE_2D, id);
         glTexImage2D(GL_TEXTURE_2D, 0, color, width, height, 0, color, GL_UNSIGNED_BYTE, null);
         glTextureParameteri(id, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -153,9 +191,10 @@ public:
         Creates a new texture with data.
     */
     this(GLenum color, uint width, uint height, void* data) {
-        glGenTextures(1, &id);
-        glBindTexture(GL_TEXTURE_2D, id);
+        uint id_; glGenTextures(1, &id_);
+        super(GL_TEXTURE, id_);
 
+        glBindTexture(GL_TEXTURE_2D, id);
         glTexImage2D(GL_TEXTURE_2D, 0, color, width, height, 0, color, GL_UNSIGNED_BYTE, data);
         glTextureParameteri(id, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTextureParameteri(id, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -185,7 +224,7 @@ public:
     } 
 }
 
-class GLFramebuffer : NuObject {
+class GLFramebuffer : GLObject {
 private:
 @nogc:
     uint width;
@@ -204,13 +243,9 @@ public:
     */
 	weak_vector!GLTexture textures;
 
-    /**
-        OpenGL ID
-    */
-    GLuint id;
-
     /// destructor
     ~this() {
+        GLuint id = this.id;
         glDeleteFramebuffers(1, &id);
     }
 
@@ -218,11 +253,12 @@ public:
         Creates a new framebuffer.
     */
 	this(uint width, uint height, string label) {
+        uint id_; glGenFramebuffers(1, &id_);
+        super(GL_FRAMEBUFFER, id_);
+
         this.width = width;
         this.height = height;
-
-		glGenFramebuffers(1, &id);
-		glObjectLabel(GL_FRAMEBUFFER, id, cast(int)label.length, label.ptr);
+        this.label = label;
 	}
 
     /**
@@ -352,6 +388,13 @@ public:
     */
     void setUniform(uint location, float value) {
         glUniform1f(location, value);
+    }
+
+    /**
+        Sets the given uniform.
+    */
+    void setUniform(uint location, vec4 value) {
+        glUniform4f(location, value.x, value.y, value.z, value.w);
     }
 
     /**

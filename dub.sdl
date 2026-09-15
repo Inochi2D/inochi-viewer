@@ -10,7 +10,7 @@ dependency "inochi2d" path="../inochi2d"
 
 targetPath "out/"
 copyFiles "libs/*" platform="windows"
-versions "GL_45" "GL_ARB_framebuffer_sRGB"
+versions "GL_45" "GL_ARB_framebuffer_sRGB" "GLFW_33"
 
 dflags "-mcpu=native"
 
